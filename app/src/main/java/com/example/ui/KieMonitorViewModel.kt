@@ -1,34 +1,33 @@
-package com.example.kiestatusmonitor.ui
+package com.example.ui
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.kiestatusmonitor.data.CookieStorage
-import com.example.kiestatusmonitor.data.HealthStatus
-import com.example.kiestatusmonitor.data.KieApiService
-import com.example.kiestatusmonitor.data.ModelFilter
-import com.example.kiestatusmonitor.data.ModelHealth
-import com.example.kiestatusmonitor.data.NetworkClient
-import com.example.kiestatusmonitor.data.SortOption
-import com.example.kiestatusmonitor.data.SystemStatusSummary
+import com.example.data.HealthStatus
+import com.example.data.KieJsonParser
+import com.example.data.ModelFilter
+import com.example.data.ModelHealth
+import com.example.data.NetworkClient
+import com.example.data.SortOption
+import com.example.data.SystemStatusSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class KieMonitorViewModel(application: Application) : AndroidViewModel(application) {
+class KieMonitorViewModel : ViewModel() {
 
-    private val cookieStorage = CookieStorage(application)
+    companion object {
+        const val DEFAULT_BUILTIN_COOKIE = "authorization=e6f6760c-4f08-4e23-a5fa-39443871251e; apidog-auth-key=gtODsq0aRXWeALgVN6DlbbERBKSlw3IH; _ga=GA1.1.402104487.1790351615; _gcl_au=1.1.1570402331.1790351615; _clck=1nxo9p5^2^g9r^0^2459"
+    }
 
-    private val defaultModels = listOf(
+    val defaultModels = listOf(
         "gemini-3.5-flash",
         "gemini-3.7-flash",
         "gemini-3.8-flash",
@@ -78,31 +77,13 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
     private val _lastRefreshTimestamp = MutableStateFlow("")
     val lastRefreshTimestamp: StateFlow<String> = _lastRefreshTimestamp.asStateFlow()
 
-    // History points map to track last 10 readings per model for uptime trends
     private val modelHistoryMap = mutableMapOf<String, MutableList<Double>>()
-
     private var autoRefreshJob: Job? = null
+    private var isFetchInProgress = false
 
     init {
-        // Load saved custom models
-        val savedCustom = cookieStorage.getCustomModels()
-        _customModels.value = savedCustom
-
-        // Load saved cookie
-        val savedCookie = cookieStorage.getSavedCookie()
-        if (savedCookie.isNotBlank()) {
-            _savedCookieText.value = savedCookie
-            val count = NetworkClient.cookieInterceptor.setCookieFromRawText(savedCookie)
-            _cookieCount.value = count
-        }
-
-        val savedInterval = cookieStorage.getRefreshInterval()
-        _autoRefreshSeconds.value = savedInterval
-
-        // Initialize empty model states
+        setCookieText(DEFAULT_BUILTIN_COOKIE)
         initInitialModelList()
-
-        // Start auto-refresh loop
         startAutoRefreshLoop()
     }
 
@@ -121,9 +102,9 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
                 modelName = formatModelName(id),
                 provider = determineProvider(id),
                 successRate = 0.0,
-                status = HealthStatus.UNTESTED,
+                status = HealthStatus.DEGRADED,
                 latencyMs = 0,
-                lastUpdated = "Pending check...",
+                lastUpdated = "Pending...",
                 isCustom = !defaultModels.contains(id)
             )
         }
@@ -132,7 +113,8 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun formatModelName(modelId: String): String {
         return modelId.split("-", "_").joinToString(" ") { word ->
-            if (word.lowercase(Locale.ROOT) in listOf("gpt", "api", "ai", "r1", "sol", "luna")) {
+            val lower = word.lowercase(Locale.ROOT)
+            if (lower in listOf("gpt", "api", "ai", "r1", "sol", "luna", "v4")) {
                 word.uppercase(Locale.ROOT)
             } else {
                 word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
@@ -177,7 +159,6 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun setAutoRefreshInterval(seconds: Int) {
         _autoRefreshSeconds.value = seconds
-        cookieStorage.saveRefreshInterval(seconds)
         if (_isAutoRefreshEnabled.value) {
             startAutoRefreshLoop()
         }
@@ -185,7 +166,6 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun setCookieText(rawCookie: String) {
         _savedCookieText.value = rawCookie
-        cookieStorage.saveCookie(rawCookie)
         val count = NetworkClient.cookieInterceptor.setCookieFromRawText(rawCookie)
         _cookieCount.value = count
         refreshStatus()
@@ -193,7 +173,6 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun clearCookie() {
         _savedCookieText.value = ""
-        cookieStorage.clearSavedCookie()
         NetworkClient.cookieInterceptor.clearCookies()
         _cookieCount.value = 0
         refreshStatus()
@@ -222,7 +201,6 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
         if (!current.contains(trimmed) && !defaultModels.contains(trimmed)) {
             current.add(trimmed)
             _customModels.value = current
-            cookieStorage.saveCustomModels(current)
             initInitialModelList()
             refreshSingleModel(trimmed)
             return true
@@ -234,7 +212,6 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
         val current = _customModels.value.toMutableList()
         if (current.remove(modelId)) {
             _customModels.value = current
-            cookieStorage.saveCustomModels(current)
             modelHistoryMap.remove(modelId)
             _modelsState.value = _modelsState.value.filter { it.modelId != modelId }
         }
@@ -251,20 +228,17 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
             var latency = 0L
 
             try {
-                val resp = NetworkClient.api.getSuccessRate(modelId)
+                val responseBody = NetworkClient.api.getSuccessRate(modelId)
                 latency = System.currentTimeMillis() - start
+                val jsonString = responseBody.string()
+                val parsed = KieJsonParser.parseSuccessRateResponse(jsonString)
 
-                rate = resp.rate
-                    ?: resp.successRate
-                    ?: resp.data?.rate
-                    ?: resp.data?.successRate
-                    ?: if (resp.code == 200 || resp.code == 0) 100.0 else 98.0
-
-                if (rate in 0.001..1.0) {
-                    rate *= 100.0
+                rate = parsed.successRate
+                if (!parsed.isSuccess && parsed.rawMessage != null) {
+                    errorMsg = parsed.rawMessage
                 }
             } catch (e: Exception) {
-                latency = System.currentTimeMillis() - start
+                latency = (System.currentTimeMillis() - start).coerceAtLeast(1)
                 errorMsg = e.localizedMessage ?: "Connection error"
                 rate = 0.0
             }
@@ -304,7 +278,10 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun refreshStatus() {
+        if (isFetchInProgress) return
+
         viewModelScope.launch(Dispatchers.IO) {
+            isFetchInProgress = true
             _isRefreshing.value = true
             val results = mutableListOf<ModelHealth>()
             val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
@@ -319,17 +296,14 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
                 var latency = 0L
 
                 try {
-                    val resp = NetworkClient.api.getSuccessRate(model)
+                    val responseBody = NetworkClient.api.getSuccessRate(model)
                     latency = System.currentTimeMillis() - start
+                    val jsonString = responseBody.string()
+                    val parsed = KieJsonParser.parseSuccessRateResponse(jsonString)
 
-                    rate = resp.rate
-                        ?: resp.successRate
-                        ?: resp.data?.rate
-                        ?: resp.data?.successRate
-                        ?: if (resp.code == 200 || resp.code == 0) 100.0 else 98.0
-
-                    if (rate in 0.001..1.0) {
-                        rate *= 100.0
+                    rate = parsed.successRate
+                    if (!parsed.isSuccess && parsed.rawMessage != null) {
+                        errorMsg = parsed.rawMessage
                     }
                 } catch (e: Exception) {
                     latency = (System.currentTimeMillis() - start).coerceAtLeast(1)
@@ -367,6 +341,7 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
             _modelsState.value = results
             _lastRefreshTimestamp.value = timestamp
             _isRefreshing.value = false
+            isFetchInProgress = false
 
             // Update details sheet if open
             _selectedModelForDetails.value?.let { currentDetail ->
@@ -386,7 +361,7 @@ class KieMonitorViewModel(application: Application) : AndroidViewModel(applicati
         val degraded = list.count { it.status == HealthStatus.DEGRADED }
         val outage = list.count { it.status == HealthStatus.OUTAGE }
 
-        val activeList = list.filter { it.status != HealthStatus.UNTESTED }
+        val activeList = list.filter { it.status != HealthStatus.OUTAGE || it.latencyMs > 0 }
         val avgSuccess = if (activeList.isNotEmpty()) activeList.map { it.successRate }.average() else 0.0
         val avgLatency = if (activeList.isNotEmpty()) activeList.map { it.latencyMs }.average().toLong() else 0L
 

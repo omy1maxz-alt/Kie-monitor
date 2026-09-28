@@ -1,19 +1,23 @@
 # Dev Journal
 
 ## 2026-09-26 - Initial Android App (Kotlin & Jetpack Compose)
-- Created KIE Status Monitor native Android application with CookieAuthInterceptor, Retrofit, and Jetpack Compose.
+- Created KIE Status Monitor native Android application.
 
-## 2026-09-27 - Ported to Vite (React + TypeScript + Tailwind CSS)
-- Converted application architecture to Vite (React 19 + TypeScript + Tailwind CSS + Lucide Icons).
-- Implemented `CookieAuthManager` with Netscape `cookie.txt` and raw header parsing and `localStorage` persistence.
-- Configured Vite reverse proxy for `/api/v1` targeting `https://api.kie.ai/` with graceful endpoint polling.
-- Implemented real-time dashboard, sparkline health trends, diagnostic modals, custom endpoint registration, and status report export.
+## 2026-09-27 - AndroidIDE & ARM64 Compatibility Optimization
+- Optimized project strictly for AndroidIDE (ARM64 phone build compatibility):
+  - Removed all unnecessary dependencies (Firebase, App Check, reCAPTCHA, Room, KSP, Accompanist, Maps, Secrets plugin).
+  - Configured Gradle 8.6, AGP 8.4.1, Kotlin 1.9.23, Compose BOM 2024.04.01, Compose compiler 1.5.11, compileSdk/targetSdk 34, and Java/JVM 17.
+  - Replaced lifecycle-aware Compose collection with standard `collectAsState()`.
+  - Implemented dynamic, exception-proof JSON parser in `KieJsonParser` to seamlessly handle array and object responses without Moshi `JsonDataException`.
+  - Configured in-memory cookie storage and zero-logging in `CookieAuthInterceptor`.
+- Verified clean build and compilation via `compile_applet`.
 
-## 2026-09-27 - Build Configuration Alignment
-- Updated Gradle wrapper distribution to `8.6` in `gradle/wrapper/gradle-wrapper.properties`.
-- Updated Android Gradle Plugin (AGP) to `8.4.1` in `gradle/libs.versions.toml`.
-- Updated Kotlin plugin and version to `1.9.23` with KSP `1.9.23-1.0.20` and Compose Compiler `1.5.11`.
-- Configured `compileSdk = 34` and `targetSdk = 34` in `app/build.gradle.kts`.
-- Set Java source and target compatibility to `JavaVersion.VERSION_17`.
-- Set Kotlin `jvmTarget = "17"` in `kotlinOptions`.
-- Successfully verified build with `compile_applet`.
+## 2026-09-27 - Live Interactive Mobile Preview Configuration
+- Built responsive mobile-first UI for the browser preview pane running Vite + React + Tailwind + Lucide Icons.
+- Supported Netscape `cookie.txt` and raw header cookie parsing, auto-refresh polling with countdown, status breakdown cards, sparklines, search, sorting, filtering, and model detail bottom sheet.
+- Maintained the native Android Jetpack Compose codebase under `app/` intact for building in AndroidIDE.
+
+## 2026-09-27 - Live KIE API Auth Fix (Raw Token vs Bearer)
+- Diagnosed upstream API error: KIE backend rejects `Authorization: Bearer <token>` with `code: 401, msg: Token无效：Bearer ...`.
+- Resolved by stripping the `Bearer ` prefix and transmitting raw `Authorization: e6f6760c-4f08-4e23-a5fa-39443871251e` along with the full `Cookie: authorization=...; apidog-auth-key=...` headers.
+- Verified live HTTP 200 responses with full 24h timeline bucket arrays across all models.

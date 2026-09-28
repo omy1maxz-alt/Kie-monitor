@@ -1,30 +1,16 @@
-export type HealthStatus = 'OPERATIONAL' | 'DEGRADED' | 'OUTAGE' | 'CHECKING' | 'UNTESTED';
-
-export interface KieMonitorResponse {
-  code?: number;
-  msg?: string;
-  message?: string;
-  rate?: number;
-  successRate?: number;
-  data?: {
-    rate?: number;
-    successRate?: number;
-    status?: string;
-    latency?: number;
-  };
-}
+export type HealthStatus = 'OPERATIONAL' | 'DEGRADED' | 'OUTAGE';
 
 export interface ModelHealth {
   modelId: string;
   modelName: string;
   provider: string;
-  successRate: number;
+  successRate: number; // 0 to 100
   status: HealthStatus;
   latencyMs: number;
   lastUpdated: string;
   errorMessage?: string | null;
   historyPoints: number[];
-  isCustom: boolean;
+  isCustom?: boolean;
 }
 
 export interface SystemStatusSummary {

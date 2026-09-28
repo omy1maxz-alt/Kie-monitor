@@ -1,20 +1,16 @@
-package com.example.kiestatusmonitor.ui
+package com.example.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -24,7 +20,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -32,8 +27,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -42,12 +35,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.kiestatusmonitor.data.HealthStatus
-import com.example.kiestatusmonitor.data.ModelFilter
-import com.example.kiestatusmonitor.data.ModelHealth
-import com.example.kiestatusmonitor.data.SortOption
+import com.example.data.HealthStatus
+import com.example.data.ModelFilter
+import com.example.data.ModelHealth
+import com.example.data.SortOption
 import com.example.ui.theme.*
 import java.util.Locale
 
@@ -56,15 +48,15 @@ import java.util.Locale
 fun KieMonitorScreen(viewModel: KieMonitorViewModel = viewModel()) {
     val context = LocalContext.current
     val models by viewModel.modelsState.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
-    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
-    val selectedFilter by viewModel.selectedFilter.collectAsStateWithLifecycle()
-    val selectedSort by viewModel.selectedSort.collectAsStateWithLifecycle()
-    val cookieCount by viewModel.cookieCount.collectAsStateWithLifecycle()
-    val savedCookieText by viewModel.savedCookieText.collectAsStateWithLifecycle()
-    val isAutoRefreshEnabled by viewModel.isAutoRefreshEnabled.collectAsStateWithLifecycle()
-    val autoRefreshSeconds by viewModel.autoRefreshSeconds.collectAsStateWithLifecycle()
-    val selectedModelForDetails by viewModel.selectedModelForDetails.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val selectedFilter by viewModel.selectedFilter.collectAsState()
+    val selectedSort by viewModel.selectedSort.collectAsState()
+    val cookieCount by viewModel.cookieCount.collectAsState()
+    val savedCookieText by viewModel.savedCookieText.collectAsState()
+    val isAutoRefreshEnabled by viewModel.isAutoRefreshEnabled.collectAsState()
+    val autoRefreshSeconds by viewModel.autoRefreshSeconds.collectAsState()
+    val selectedModelForDetails by viewModel.selectedModelForDetails.collectAsState()
 
     var showCookieDialog by remember { mutableStateOf(false) }
     var showAddModelDialog by remember { mutableStateOf(false) }
@@ -150,9 +142,11 @@ fun KieMonitorScreen(viewModel: KieMonitorViewModel = viewModel()) {
                                 color = TextPrimary
                             )
                             Text(
-                                text = if (summary.lastRefreshTime.isNotEmpty()) "Live 24H • Updated ${summary.lastRefreshTime}" else "Connecting to KIE API...",
+                                text = if (summary.lastRefreshTime.isNotEmpty()) "Real-time API availability & latency • ${summary.lastRefreshTime}" else "Real-time API availability & latency",
                                 fontSize = 11.sp,
-                                color = TextSecondary
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -182,7 +176,7 @@ fun KieMonitorScreen(viewModel: KieMonitorViewModel = viewModel()) {
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = if (cookieCount > 0) "$cookieCount Cookies" else "No Cookie",
+                                text = if (cookieCount > 0) "$cookieCount Cookies" else "Cookie",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = if (cookieCount > 0) StatusOperationalText else TextSecondary
@@ -366,7 +360,7 @@ fun KieMonitorScreen(viewModel: KieMonitorViewModel = viewModel()) {
                             selected = selectedFilter == ModelFilter.DEEPSEEK,
                             onClick = { viewModel.setFilter(ModelFilter.DEEPSEEK) }
                         )
-                        val issueCount = models.count { it.status != HealthStatus.OPERATIONAL && it.status != HealthStatus.UNTESTED }
+                        val issueCount = models.count { it.status != HealthStatus.OPERATIONAL }
                         ModelFilterChip(
                             label = "Issues ($issueCount)",
                             selected = selectedFilter == ModelFilter.ISSUES_ONLY,
@@ -527,7 +521,7 @@ fun KieMonitorScreen(viewModel: KieMonitorViewModel = viewModel()) {
 
 @Composable
 fun StatusSummaryDashboard(
-    summary: com.example.kiestatusmonitor.data.SystemStatusSummary,
+    summary: com.example.data.SystemStatusSummary,
     isRefreshing: Boolean,
     onCopyReport: () -> Unit
 ) {
@@ -762,8 +756,6 @@ fun ModelStatusCard(
         HealthStatus.OPERATIONAL -> Triple(StatusOperational, StatusOperationalBg, "Operational")
         HealthStatus.DEGRADED -> Triple(StatusDegraded, StatusDegradedBg, "Degraded")
         HealthStatus.OUTAGE -> Triple(StatusOutage, StatusOutageBg, "Outage")
-        HealthStatus.CHECKING -> Triple(AccentCyan, SurfaceDark, "Checking...")
-        HealthStatus.UNTESTED -> Triple(StatusUntested, StatusUntestedBg, "Pending")
     }
 
     Card(
@@ -807,7 +799,7 @@ fun ModelStatusCard(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = model.modelName,
+                                text = model.modelName.uppercase(),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = TextPrimary,
@@ -845,7 +837,7 @@ fun ModelStatusCard(
                 // Success rate & status pill
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = if (model.status == HealthStatus.UNTESTED) "--%" else String.format(Locale.US, "%.1f%%", model.successRate),
+                        text = String.format(Locale.US, "%.1f%%", model.successRate),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -904,7 +896,7 @@ fun ModelStatusCard(
                     )
                 }
 
-                // Sparkline / Mini Trend Bars
+                // Sparkline / Mini Trend Bars & Ping button
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -998,7 +990,7 @@ fun CookieAuthDialog(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Paste your cookie.txt export (Netscape format) or raw HTTP Cookie headers (cf_clearance=...; session=...):",
+                    text = "Paste cookie.txt content or raw cookie header:",
                     fontSize = 12.sp,
                     color = TextSecondary
                 )
@@ -1008,8 +1000,8 @@ fun CookieAuthDialog(
                     onValueChange = { cookieInput = it },
                     placeholder = {
                         Text(
-                            "# Netscape HTTP Cookie File\napi.kie.ai\tTRUE\t/\tFALSE\t0\tcf_clearance\txxx\napi.kie.ai\tTRUE\t/\tFALSE\t0\tsession\tyyy",
-                            fontSize = 10.sp,
+                            "Paste cookie.txt content or raw cookie header",
+                            fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = TextTertiary
                         )
@@ -1125,19 +1117,22 @@ fun AddCustomModelDialog(
                     onValueChange = { modelIdInput = it },
                     placeholder = { Text("e.g. claude-3-7-sonnet", fontSize = 12.sp, color = TextTertiary) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = BgDarkest,
                         unfocusedContainerColor = BgDarkest,
                         focusedBorderColor = PrimaryIndigoLight,
-                        unfocusedBorderColor = SurfaceBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    )
+                        unfocusedBorderColor = SurfaceBorder
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 )
 
-                Text("Quick Suggestions:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextTertiary)
+                Text(
+                    text = "Popular choices:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextTertiary
+                )
 
                 Row(
                     modifier = Modifier
@@ -1147,18 +1142,18 @@ fun AddCustomModelDialog(
                 ) {
                     popularSuggestions.forEach { suggestion ->
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = BgDarkest,
+                            shape = RoundedCornerShape(6.dp),
+                            color = BgDark,
                             border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(6.dp))
                                 .clickable { modelIdInput = suggestion }
                         ) {
                             Text(
-                                text = suggestion,
+                                text = "+ $suggestion",
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
-                                color = AccentSky,
+                                color = TextSecondary,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
@@ -1168,15 +1163,11 @@ fun AddCustomModelDialog(
         },
         confirmButton = {
             Button(
-                onClick = {
-                    if (modelIdInput.isNotBlank()) {
-                        onAdd(modelIdInput.trim())
-                    }
-                },
+                onClick = { onAdd(modelIdInput) },
                 enabled = modelIdInput.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo)
             ) {
-                Text("Add Endpoint")
+                Text("Add Model")
             }
         },
         dismissButton = {
@@ -1196,8 +1187,6 @@ fun SettingsDialog(
     onOpenCookie: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val intervalOptions = listOf(15, 30, 45, 60, 120)
-
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SurfaceDark,
@@ -1206,8 +1195,8 @@ fun SettingsDialog(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.Tune, contentDescription = null, tint = AccentSky)
-                Text("Monitoring Settings", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Icon(Icons.Default.Tune, contentDescription = null, tint = AccentCyan)
+                Text("Monitor Settings", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
@@ -1215,15 +1204,15 @@ fun SettingsDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Auto Refresh Switch
+                // Auto refresh toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("Auto-Refresh Loop", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Continuous background polling", color = TextSecondary, fontSize = 11.sp)
+                        Text("Auto-Refresh", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Text("Continuously poll endpoints", color = TextSecondary, fontSize = 11.sp)
                     }
                     Switch(
                         checked = autoRefreshEnabled,
@@ -1235,22 +1224,21 @@ fun SettingsDialog(
                     )
                 }
 
-                Divider(color = SurfaceBorder)
-
-                // Refresh Interval
+                // Polling Interval Select
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Polling Interval", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Refresh Frequency", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        intervalOptions.forEach { sec ->
+                        listOf(15, 30, 45, 60, 120).forEach { sec ->
+                            val selected = refreshIntervalSeconds == sec
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = if (refreshIntervalSeconds == sec) PrimaryIndigo else BgDarkest,
+                                color = if (selected) PrimaryIndigo else BgDark,
                                 border = androidx.compose.foundation.BorderStroke(
                                     1.dp,
-                                    if (refreshIntervalSeconds == sec) PrimaryIndigoLight else SurfaceBorder
+                                    if (selected) PrimaryIndigoLight else SurfaceBorder
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
@@ -1264,8 +1252,8 @@ fun SettingsDialog(
                                     Text(
                                         text = "${sec}s",
                                         fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (refreshIntervalSeconds == sec) Color.White else TextSecondary
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (selected) Color.White else TextSecondary
                                     )
                                 }
                             }
@@ -1273,17 +1261,30 @@ fun SettingsDialog(
                     }
                 }
 
-                Divider(color = SurfaceBorder)
+                Divider(color = SurfaceBorder, thickness = 1.dp)
 
-                // Manage Cookie shortcut
-                Button(
-                    onClick = onOpenCookie,
-                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceLightDark),
-                    modifier = Modifier.fillMaxWidth()
+                // Quick cookie link
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = BgDark,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onOpenCookie)
                 ) {
-                    Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Configure Cookie Authentication", fontSize = 12.sp)
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Key, contentDescription = null, tint = AccentSky, modifier = Modifier.size(18.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Cookie Authentication", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text("Manage session headers", color = TextSecondary, fontSize = 10.sp)
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TextTertiary)
+                    }
                 }
             }
         },
@@ -1309,8 +1310,6 @@ fun ModelDetailsDialog(
         HealthStatus.OPERATIONAL -> Triple(StatusOperational, StatusOperationalBg, "Operational")
         HealthStatus.DEGRADED -> Triple(StatusDegraded, StatusDegradedBg, "Degraded")
         HealthStatus.OUTAGE -> Triple(StatusOutage, StatusOutageBg, "Outage")
-        HealthStatus.CHECKING -> Triple(AccentCyan, SurfaceDark, "Checking...")
-        HealthStatus.UNTESTED -> Triple(StatusUntested, StatusUntestedBg, "Pending")
     }
 
     AlertDialog(
@@ -1318,25 +1317,18 @@ fun ModelDetailsDialog(
         containerColor = SurfaceDark,
         title = {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(statusColor)
+                )
                 Column {
-                    Text(model.modelName, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(model.modelName.uppercase(), color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Text(model.modelId, color = TextTertiary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                }
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = statusBg
-                ) {
-                    Text(
-                        text = statusText,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = statusColor,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
                 }
             }
         },
@@ -1345,87 +1337,23 @@ fun ModelDetailsDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Key metrics row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = BgDarkest,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Text("SUCCESS RATE", fontSize = 9.sp, color = TextTertiary, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = String.format(Locale.US, "%.1f%%", model.successRate),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = statusColor,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = BgDarkest,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Text("LATENCY", fontSize = 9.sp, color = TextTertiary, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = if (model.latencyMs > 0) "${model.latencyMs}ms" else "--",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = AccentSky,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                }
-
-                // Provider & Endpoint Info
+                // Key metrics box
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = BgDarkest,
+                    shape = RoundedCornerShape(10.dp),
+                    color = BgDark,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("Provider: ${model.provider}", fontSize = 11.sp, color = TextSecondary)
-                        Text("API Route: /api/v1/monitor/success-rate?model=${model.modelId}", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = TextTertiary)
-                        Text("Last Verified: ${model.lastUpdated}", fontSize = 10.sp, color = TextTertiary)
-                    }
-                }
-
-                // History timeline if points exist
-                if (model.historyPoints.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Recent Check History:", fontSize = 10.sp, color = TextTertiary, fontWeight = FontWeight.Bold)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(28.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(BgDarkest)
-                                .padding(horizontal = 6.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            model.historyPoints.forEach { pt ->
-                                val c = if (pt >= 90.0) StatusOperational else if (pt >= 50.0) StatusDegraded else StatusOutage
-                                Surface(
-                                    shape = RoundedCornerShape(2.dp),
-                                    color = c,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                ) {}
-                            }
-                        }
+                        DetailRow(label = "Status", value = statusText, color = statusColor)
+                        DetailRow(label = "Success Rate", value = String.format(Locale.US, "%.1f%%", model.successRate), color = statusColor)
+                        DetailRow(label = "Provider", value = model.provider, color = TextPrimary)
+                        DetailRow(label = "Latency", value = "${model.latencyMs}ms", color = AccentSky)
+                        DetailRow(label = "Last Check", value = model.lastUpdated, color = TextSecondary)
+                        DetailRow(label = "Type", value = if (model.isCustom) "Custom User Endpoint" else "Standard Catalog", color = TextSecondary)
                     }
                 }
 
@@ -1433,34 +1361,38 @@ fun ModelDetailsDialog(
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = StatusOutageBg.copy(alpha = 0.5f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, StatusOutage.copy(alpha = 0.3f)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, StatusOutage.copy(alpha = 0.4f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text("Reported Error:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = StatusOutageText)
-                            Text(model.errorMessage, fontSize = 11.sp, color = StatusOutageText)
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text("Diagnostic Information", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = StatusOutageText)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(model.errorMessage, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = StatusOutageText)
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (onDelete != null) {
-                    TextButton(
-                        onClick = onDelete,
-                        colors = ButtonDefaults.textButtonColors(contentColor = StatusOutage)
-                    ) {
-                        Text("Remove")
-                    }
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = onPing,
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo)
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Ping Now")
+                    Text("Ping")
+                }
+
+                if (onDelete != null) {
+                    OutlinedButton(
+                        onClick = onDelete,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusOutage)
+                    ) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Remove")
+                    }
                 }
             }
         },
@@ -1470,4 +1402,15 @@ fun ModelDetailsDialog(
             }
         }
     )
+}
+
+@Composable
+fun DetailRow(label: String, value: String, color: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, fontSize = 12.sp, color = TextSecondary)
+        Text(text = value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = color)
+    }
 }

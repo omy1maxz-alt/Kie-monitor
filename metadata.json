@@ -1,5 +1,5 @@
 {
-  "name": "KIE Status",
+  "name": "KIE Status Monitor",
   "description": "Real-time 24H status and availability monitor for AI models via KIE API with cookie authentication.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
