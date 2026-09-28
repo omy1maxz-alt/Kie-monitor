@@ -1,0 +1,65 @@
+{
+  "allFiles": [
+    {
+      "file": "/storage/emulated/0/AndroidIDEProjects/Kie-monitor/gradle/libs.versions.toml",
+      "selection": {
+        "end": {
+          "column": 69,
+          "index": 5803,
+          "line": 89
+        },
+        "start": {
+          "column": 69,
+          "index": 5803,
+          "line": 89
+        }
+      }
+    },
+    {
+      "file": "/storage/emulated/0/AndroidIDEProjects/Kie-monitor/app/build.gradle.kts",
+      "selection": {
+        "end": {
+          "column": 34,
+          "index": 4006,
+          "line": 116
+        },
+        "start": {
+          "column": 34,
+          "index": 4006,
+          "line": 116
+        }
+      }
+    },
+    {
+      "file": "/storage/emulated/0/AndroidIDEProjects/Kie-monitor/app/src/main/java/com/example/kiestatusmonitor/ui/KieMonitorScreen.kt",
+      "selection": {
+        "end": {
+          "column": 56,
+          "index": 2556,
+          "line": 57
+        },
+        "start": {
+          "column": 56,
+          "index": 2556,
+          "line": 57
+        }
+      }
+    },
+    {
+      "file": "/storage/emulated/0/AndroidIDEProjects/Kie-monitor/app/src/main/java/com/example/MainActivity.kt",
+      "selection": {
+        "end": {
+          "column": 0,
+          "index": 1137,
+          "line": 33
+        },
+        "start": {
+          "column": 0,
+          "index": 1137,
+          "line": 33
+        }
+      }
+    }
+  ],
+  "selectedFile": "/storage/emulated/0/AndroidIDEProjects/Kie-monitor/app/src/main/java/com/example/MainActivity.kt"
+}

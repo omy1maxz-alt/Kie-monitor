@@ -55,7 +55,7 @@ import java.util.Locale
 @Composable
 fun KieMonitorScreen(viewModel: KieMonitorViewModel = viewModel()) {
     val context = LocalContext.current
-    val models by viewModel.modelsState.collectAsStateWithLifecycle()
+    val models by viewModel.modelsState.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedFilter by viewModel.selectedFilter.collectAsStateWithLifecycle()
