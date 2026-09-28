@@ -17,7 +17,8 @@
 - Supported Netscape `cookie.txt` and raw header cookie parsing, auto-refresh polling with countdown, status breakdown cards, sparklines, search, sorting, filtering, and model detail bottom sheet.
 - Maintained the native Android Jetpack Compose codebase under `app/` intact for building in AndroidIDE.
 
-## 2026-09-27 - Live KIE API Auth Fix (Raw Token vs Bearer)
-- Diagnosed upstream API error: KIE backend rejects `Authorization: Bearer <token>` with `code: 401, msg: Token无效：Bearer ...`.
-- Resolved by stripping the `Bearer ` prefix and transmitting raw `Authorization: e6f6760c-4f08-4e23-a5fa-39443871251e` along with the full `Cookie: authorization=...; apidog-auth-key=...` headers.
-- Verified live HTTP 200 responses with full 24h timeline bucket arrays across all models.
+## 2026-09-27 - Model ID Real-Time Alignment & In-Progress Bucket Handling
+- Scanned KIE upstream monitor database to identify active monitored model keys.
+- Discovered active model keys: `gemini-2.5-flash`, `gemini-2.5-pro`, `claude-sonnet-5`, `claude-opus-5`, `deepseek-v4-1-flash`, `gpt-5-6-sol`, `gpt-5-6-luna`, `gpt-5-5`, `gpt-5-2`.
+- Fixed bucket parser to handle null current intervals by extracting data from `isNormal` and completed buckets.
+- Updated default model registry in both Android and Web implementations.

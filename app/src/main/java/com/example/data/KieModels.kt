@@ -101,9 +101,11 @@ object KieJsonParser {
         if (item == null) return null
         if (item is Number) return item.toDouble()
         if (item is JSONObject) {
-            if (item.has("rate") && !item.isNull("rate")) return item.optDouble("rate")
             if (item.has("successRate") && !item.isNull("successRate")) return item.optDouble("successRate")
+            if (item.has("rate") && !item.isNull("rate")) return item.optDouble("rate")
             if (item.has("success_rate") && !item.isNull("success_rate")) return item.optDouble("success_rate")
+            if (item.has("errorRate") && !item.isNull("errorRate")) return (100.0 - item.optDouble("errorRate")).coerceIn(0.0, 100.0)
+            if (item.has("isNormal") && !item.isNull("isNormal")) return if (item.optBoolean("isNormal")) 100.0 else 0.0
             if (item.has("value") && !item.isNull("value")) return item.optDouble("value")
             if (item.has("ratio") && !item.isNull("ratio")) return item.optDouble("ratio")
         }

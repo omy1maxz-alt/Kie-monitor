@@ -28,17 +28,15 @@ class KieMonitorViewModel : ViewModel() {
     }
 
     val defaultModels = listOf(
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
-        "gemini-3.8-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
         "gpt-5-6-sol",
         "gpt-5-6-luna",
         "gpt-5-5",
         "gpt-5-2",
         "claude-sonnet-5",
         "claude-opus-5",
-        "deepseek-v4-1-flash",
-        "deepseek-r1"
+        "deepseek-v4-1-flash"
     )
 
     private val _customModels = MutableStateFlow<List<String>>(emptyList())

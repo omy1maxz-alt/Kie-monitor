@@ -1,17 +1,15 @@
 import { HealthStatus, ModelHealth } from '../types';
 
 export const DEFAULT_MODELS = [
-  'gemini-3.5-flash',
-  'gemini-3.7-flash',
-  'gemini-3.8-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
   'gpt-5-6-sol',
   'gpt-5-6-luna',
   'gpt-5-5',
   'gpt-5-2',
   'claude-sonnet-5',
   'claude-opus-5',
-  'deepseek-v4-1-flash',
-  'deepseek-r1'
+  'deepseek-v4-1-flash'
 ];
 
 export const DEFAULT_BUILTIN_COOKIE =
@@ -130,23 +128,30 @@ class KieService {
     return Math.min(Math.max(r, 0), 100);
   }
 
+  private extractBucketRate(item: any): number | null {
+    if (item === null || item === undefined) return null;
+    if (typeof item === 'number') return this.normalizeRate(item);
+    if (typeof item === 'object') {
+      if (typeof item.successRate === 'number') return this.normalizeRate(item.successRate);
+      if (typeof item.rate === 'number') return this.normalizeRate(item.rate);
+      if (typeof item.success_rate === 'number') return this.normalizeRate(item.success_rate);
+      if (typeof item.errorRate === 'number') return this.normalizeRate(100 - item.errorRate);
+      if (typeof item.isNormal === 'boolean') return item.isNormal ? 100.0 : 0.0;
+      if (typeof item.value === 'number') return this.normalizeRate(item.value);
+    }
+    return null;
+  }
+
   parseKieResponse(data: any): { successRate: number; isSuccess: boolean; history: number[]; rawMessage?: string } {
     try {
       if (Array.isArray(data)) {
         const history: number[] = [];
         let latest = 100.0;
         for (const item of data) {
-          if (typeof item === 'number') {
-            const norm = this.normalizeRate(item);
-            history.push(norm);
-            latest = norm;
-          } else if (item && typeof item === 'object') {
-            const val = item.successRate ?? item.rate ?? item.success_rate ?? item.value;
-            if (typeof val === 'number') {
-              const norm = this.normalizeRate(val);
-              history.push(norm);
-              latest = norm;
-            }
+          const rate = this.extractBucketRate(item);
+          if (rate !== null) {
+            history.push(rate);
+            latest = rate;
           }
         }
         return { successRate: latest, isSuccess: true, history };
@@ -165,23 +170,16 @@ class KieService {
 
         if (Array.isArray(data.data)) {
           for (const item of data.data) {
-            if (typeof item === 'number') {
-              const norm = this.normalizeRate(item);
-              history.push(norm);
-              latestRate = norm;
-            } else if (item && typeof item === 'object') {
-              const val = item.successRate ?? item.rate ?? item.success_rate ?? item.value;
-              if (typeof val === 'number') {
-                const norm = this.normalizeRate(val);
-                history.push(norm);
-                latestRate = norm;
-              }
+            const rate = this.extractBucketRate(item);
+            if (rate !== null) {
+              history.push(rate);
+              latestRate = rate;
             }
           }
         } else if (data.data && typeof data.data === 'object') {
-          const val = data.data.successRate ?? data.data.rate ?? data.data.success_rate ?? data.data.value;
-          if (typeof val === 'number') {
-            latestRate = this.normalizeRate(val);
+          const rate = this.extractBucketRate(data.data);
+          if (rate !== null) {
+            latestRate = rate;
             history.push(latestRate);
           }
         } else if (typeof data.data === 'number') {
