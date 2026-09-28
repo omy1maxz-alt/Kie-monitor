@@ -12,13 +12,12 @@ import {
   Check,
   KeyRound,
   ChevronRight,
-  TrendingUp,
-  Sparkles,
   Zap,
-  X
+  ArrowDown
 } from 'lucide-react';
 import { ModelHealth, HealthStatus, ModelFilter, SortOption, SystemStatusSummary } from './types';
 import { kieService, DEFAULT_MODELS, DEFAULT_BUILTIN_COOKIE } from './services/kieService';
+import { DraggableSheet } from './components/DraggableSheet';
 
 export const App: React.FC = () => {
   const [models, setModels] = useState<ModelHealth[]>([]);
@@ -41,6 +40,11 @@ export const App: React.FC = () => {
   const [showSortModal, setShowSortModal] = useState<boolean>(false);
   const [showAutoRefreshModal, setShowAutoRefreshModal] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Pull to refresh states
+  const [pullDistance, setPullDistance] = useState<number>(0);
+  const [isPulling, setIsPulling] = useState<boolean>(false);
+  const pullStartYRef = useRef<number>(0);
 
   const historyMapRef = useRef<Map<string, number[]>>(new Map());
 
@@ -70,36 +74,40 @@ export const App: React.FC = () => {
   const refreshAllModels = useCallback(async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
+
     const allIds = Array.from(new Set([...DEFAULT_MODELS, ...customModels]));
     const results: ModelHealth[] = [];
 
-    for (const id of allIds) {
-      const currentHistory = historyMapRef.current.get(id) || [];
-      const health = await kieService.fetchModelHealth(id, currentHistory);
+    // Parallel fetch
+    const promises = allIds.map(async id => {
+      const existingHistory = historyMapRef.current.get(id) || [];
+      const health = await kieService.fetchModelHealth(id, existingHistory);
       historyMapRef.current.set(id, health.historyPoints);
-      results.push(health);
+      return health;
+    });
+
+    const settled = await Promise.allSettled(promises);
+    for (const res of settled) {
+      if (res.status === 'fulfilled') {
+        results.push(res.value);
+      }
     }
 
     setModels(results);
     setIsRefreshing(false);
     setCountdown(autoRefreshSeconds);
+  }, [customModels, isRefreshing, autoRefreshSeconds]);
 
-    if (selectedModel) {
-      const updated = results.find(m => m.modelId === selectedModel.modelId);
-      if (updated) setSelectedModel(updated);
-    }
-  }, [isRefreshing, customModels, autoRefreshSeconds, selectedModel]);
-
-  // Initial refresh trigger
+  // Initial fetch once
   useEffect(() => {
     refreshAllModels();
-  }, [customModels]);
+  }, [refreshAllModels]);
 
   // Auto-refresh countdown timer
   useEffect(() => {
     if (!isAutoRefreshEnabled) return;
 
-    const timer = setInterval(() => {
+    const interval = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
           refreshAllModels();
@@ -109,20 +117,49 @@ export const App: React.FC = () => {
       });
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => clearInterval(interval);
   }, [isAutoRefreshEnabled, autoRefreshSeconds, refreshAllModels]);
 
-  // Single model refresh
-  const refreshSingle = async (modelId: string) => {
-    const currentHistory = historyMapRef.current.get(modelId) || [];
-    const health = await kieService.fetchModelHealth(modelId, currentHistory);
-    historyMapRef.current.set(modelId, health.historyPoints);
-
-    setModels(prev => prev.map(m => (m.modelId === modelId ? health : m)));
-    if (selectedModel?.modelId === modelId) {
-      setSelectedModel(health);
+  // Pull to refresh touch handlers
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (window.scrollY === 0) {
+      pullStartYRef.current = e.touches[0].clientY;
+      setIsPulling(true);
     }
-    showToast(`Updated ${health.modelName}`);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isPulling || isRefreshing) return;
+    const currentY = e.touches[0].clientY;
+    const delta = currentY - pullStartYRef.current;
+    if (delta > 0 && window.scrollY === 0) {
+      // Apply rubber band resistance
+      setPullDistance(Math.min(100, delta * 0.45));
+    } else {
+      setPullDistance(0);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (!isPulling) return;
+    setIsPulling(false);
+    if (pullDistance > 55 && !isRefreshing) {
+      refreshAllModels();
+    }
+    setPullDistance(0);
+  };
+
+  // Refresh single model
+  const refreshSingle = async (modelId: string) => {
+    const existingHistory = historyMapRef.current.get(modelId) || [];
+    const updated = await kieService.fetchModelHealth(modelId, existingHistory);
+    historyMapRef.current.set(modelId, updated.historyPoints);
+
+    setModels(prev => prev.map(m => (m.modelId === modelId ? updated : m)));
+    if (selectedModel?.modelId === modelId) {
+      setSelectedModel(updated);
+    }
+    showToast(`Refreshed ${modelId}`);
   };
 
   // Add custom model
@@ -132,7 +169,7 @@ export const App: React.FC = () => {
     if (!trimmed) return;
 
     if (DEFAULT_MODELS.includes(trimmed) || customModels.includes(trimmed)) {
-      showToast('Model already exists');
+      showToast('Model already in list');
       return;
     }
 
@@ -145,7 +182,6 @@ export const App: React.FC = () => {
   // Remove custom model
   const handleRemoveCustomModel = (modelId: string) => {
     setCustomModels(prev => prev.filter(id => id !== modelId));
-    historyMapRef.current.delete(modelId);
     setModels(prev => prev.filter(m => m.modelId !== modelId));
     if (selectedModel?.modelId === modelId) {
       setSelectedModel(null);
@@ -153,12 +189,12 @@ export const App: React.FC = () => {
     showToast(`Removed ${modelId}`);
   };
 
-  // Cookie save
+  // Apply cookie
   const handleSaveCookie = () => {
     const count = kieService.setCookieFromRawText(rawCookieInput);
     setCookieCount(count);
     setShowCookieModal(false);
-    showToast(count > 0 ? `Loaded ${count} active cookie tokens` : 'No valid cookies found');
+    showToast(`Saved ${count} active cookie tokens`);
     refreshAllModels();
   };
 
@@ -167,336 +203,403 @@ export const App: React.FC = () => {
     setCookieCount(0);
     setRawCookieInput('');
     setShowCookieModal(false);
-    showToast('Cleared cookies');
+    showToast('Cookies cleared');
     refreshAllModels();
   };
 
-  // System summary
-  const summary: SystemStatusSummary = useMemo(() => {
-    const total = models.length;
-    if (total === 0) {
-      return {
-        totalModels: 0,
-        operationalCount: 0,
-        degradedCount: 0,
-        outageCount: 0,
-        averageSuccessRate: 0,
-        averageLatencyMs: 0,
-        lastRefreshTime: '',
-        activeCookieCount: cookieCount
-      };
-    }
+  // Copy status report
+  const copyStatusReport = () => {
+    const lines = [
+      `KIE AI Models Health Report (${new Date().toLocaleTimeString()})`,
+      `Overall System Availability: ${summary.averageSuccessRate.toFixed(1)}%`,
+      `Operational: ${summary.operationalCount} | Degraded: ${summary.degradedCount} | Outages: ${summary.outageCount}`,
+      '----------------------------------------',
+      ...models.map(m => `[${m.status.padEnd(11)}] ${m.modelId.padEnd(22)}: ${m.successRate.toFixed(1)}% (${m.latencyMs}ms)`)
+    ];
 
-    const op = models.filter(m => m.status === 'OPERATIONAL').length;
-    const deg = models.filter(m => m.status === 'DEGRADED').length;
-    const out = models.filter(m => m.status === 'OUTAGE').length;
-    const active = models.filter(m => m.status !== 'OUTAGE' || m.latencyMs > 0);
-    const avgRate = active.length > 0 ? active.reduce((acc, m) => acc + m.successRate, 0) / active.length : 0;
-    const avgLat = active.length > 0 ? Math.round(active.reduce((acc, m) => acc + m.latencyMs, 0) / active.length) : 0;
+    navigator.clipboard.writeText(lines.join('\n'));
+    showToast('Status report copied to clipboard');
+  };
 
-    return {
-      totalModels: total,
-      operationalCount: op,
-      degradedCount: deg,
-      outageCount: out,
-      averageSuccessRate: avgRate,
-      averageLatencyMs: avgLat,
-      lastRefreshTime: models[0]?.lastUpdated || '',
-      activeCookieCount: cookieCount
-    };
-  }, [models, cookieCount]);
-
-  // Filtered and sorted models
-  const displayedModels = useMemo(() => {
+  // Filtered & Sorted models
+  const filteredModels = useMemo(() => {
     let list = [...models];
 
     // Search
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(m => m.modelId.toLowerCase().includes(q) || m.modelName.toLowerCase().includes(q) || m.provider.toLowerCase().includes(q));
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        m =>
+          m.modelId.toLowerCase().includes(q) ||
+          m.modelName.toLowerCase().includes(q) ||
+          m.provider.toLowerCase().includes(q)
+      );
     }
 
     // Filter
-    if (selectedFilter === 'GOOGLE') list = list.filter(m => m.provider === 'Google');
-    else if (selectedFilter === 'OPENAI') list = list.filter(m => m.provider === 'OpenAI');
-    else if (selectedFilter === 'ANTHROPIC') list = list.filter(m => m.provider === 'Anthropic');
-    else if (selectedFilter === 'DEEPSEEK') list = list.filter(m => m.provider === 'DeepSeek');
-    else if (selectedFilter === 'ISSUES_ONLY') list = list.filter(m => m.status !== 'OPERATIONAL');
+    switch (selectedFilter) {
+      case 'GOOGLE':
+        list = list.filter(m => m.provider.toLowerCase().includes('google'));
+        break;
+      case 'OPENAI':
+        list = list.filter(m => m.provider.toLowerCase().includes('openai'));
+        break;
+      case 'ANTHROPIC':
+        list = list.filter(m => m.provider.toLowerCase().includes('anthropic'));
+        break;
+      case 'DEEPSEEK':
+        list = list.filter(m => m.provider.toLowerCase().includes('deepseek'));
+        break;
+      case 'ISSUES_ONLY':
+        list = list.filter(m => m.status !== 'OPERATIONAL');
+        break;
+      default:
+        break;
+    }
 
     // Sort
-    if (selectedSort === 'SUCCESS_RATE_DESC') list.sort((a, b) => b.successRate - a.successRate);
-    else if (selectedSort === 'SUCCESS_RATE_ASC') list.sort((a, b) => a.successRate - b.successRate);
-    else if (selectedSort === 'LATENCY_ASC') list.sort((a, b) => a.latencyMs - b.latencyMs);
-    else if (selectedSort === 'NAME_ASC') list.sort((a, b) => a.modelName.localeCompare(b.modelName));
+    switch (selectedSort) {
+      case 'SUCCESS_RATE_DESC':
+        list.sort((a, b) => b.successRate - a.successRate);
+        break;
+      case 'SUCCESS_RATE_ASC':
+        list.sort((a, b) => a.successRate - b.successRate);
+        break;
+      case 'LATENCY_ASC':
+        list.sort((a, b) => (a.latencyMs || 9999) - (b.latencyMs || 9999));
+        break;
+      case 'NAME_ASC':
+        list.sort((a, b) => a.modelName.localeCompare(b.modelName));
+        break;
+      default:
+        break;
+    }
 
     return list;
   }, [models, searchQuery, selectedFilter, selectedSort]);
 
-  // Copy report
-  const handleCopyReport = () => {
-    let text = `=== KIE Status Monitor Report ===\n`;
-    text += `Time: ${new Date().toLocaleString()}\n`;
-    text += `Total Models: ${summary.totalModels} | Operational: ${summary.operationalCount} | Degraded: ${summary.degradedCount} | Outages: ${summary.outageCount}\n`;
-    text += `Average Success Rate: ${summary.averageSuccessRate.toFixed(1)}%\n`;
-    text += `Average Latency: ${summary.averageLatencyMs}ms\n\n`;
-    text += `Models Breakdown:\n`;
+  // Status Summary
+  const summary: SystemStatusSummary = useMemo(() => {
+    let operational = 0;
+    let degraded = 0;
+    let outage = 0;
+    let totalRate = 0;
+    let totalLatency = 0;
+    let validLatencyCount = 0;
+
     for (const m of models) {
-      text += `- ${m.modelName} (${m.modelId}) [${m.provider}]: ${m.successRate.toFixed(1)}% | ${m.status} | ${m.latencyMs}ms\n`;
+      if (m.status === 'OPERATIONAL') operational++;
+      else if (m.status === 'DEGRADED') degraded++;
+      else outage++;
+
+      totalRate += m.successRate;
+      if (m.latencyMs > 0) {
+        totalLatency += m.latencyMs;
+        validLatencyCount++;
+      }
     }
 
-    navigator.clipboard.writeText(text);
-    showToast('Copied status report to clipboard');
-  };
+    const count = models.length || 1;
+    return {
+      totalModels: models.length,
+      operationalCount: operational,
+      degradedCount: degraded,
+      outageCount: outage,
+      averageSuccessRate: totalRate / count,
+      averageLatencyMs: validLatencyCount > 0 ? Math.round(totalLatency / validLatencyCount) : 0,
+      lastRefreshTime: new Date().toLocaleTimeString(),
+      activeCookieCount: cookieCount
+    };
+  }, [models, cookieCount]);
 
   const getStatusColor = (status: HealthStatus) => {
     switch (status) {
       case 'OPERATIONAL':
-        return { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', dot: 'bg-emerald-400' };
+        return {
+          badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+          dot: 'bg-emerald-400 shadow-emerald-400/50',
+          text: 'text-emerald-400'
+        };
       case 'DEGRADED':
-        return { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', dot: 'bg-amber-400' };
+        return {
+          badge: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+          dot: 'bg-amber-400 shadow-amber-400/50',
+          text: 'text-amber-400'
+        };
       case 'OUTAGE':
-        return { text: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/30', dot: 'bg-rose-400' };
+        return {
+          badge: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
+          dot: 'bg-rose-400 shadow-rose-400/50',
+          text: 'text-rose-400'
+        };
     }
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0B0F19] text-slate-100 max-w-md mx-auto relative overflow-hidden pb-12">
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      className="min-h-screen bg-[#0a0d14] text-slate-100 flex flex-col font-sans pb-20 select-none overflow-x-hidden"
+    >
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-4 inset-x-4 max-w-xs mx-auto z-50 bg-slate-800 text-slate-100 px-4 py-3 rounded-xl shadow-2xl border border-slate-700/80 flex items-center justify-between gap-3 text-sm animate-fade-in">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span className="font-medium">{toastMessage}</span>
-          </div>
-          <button onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-slate-200">
-            <X className="w-4 h-4" />
-          </button>
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border border-cyan-500/40 text-cyan-300 text-xs px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-2 animate-bounce">
+          <Zap className="w-3.5 h-3.5 text-cyan-400" />
+          <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Top Mobile App Bar */}
-      <header className="sticky top-0 z-30 bg-[#0B0F19]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Activity className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h1 className="text-base font-bold tracking-tight text-white">KIE Status</h1>
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            </div>
-            <p className="text-[11px] text-slate-400 font-mono">Real-time API Monitor</p>
+      {/* Pull to refresh visual indicator */}
+      {pullDistance > 0 && (
+        <div
+          className="w-full flex items-center justify-center transition-transform"
+          style={{ height: `${pullDistance}px`, opacity: pullDistance / 60 }}
+        >
+          <div className="flex items-center gap-2 text-xs font-mono font-bold text-cyan-400 bg-slate-900/90 px-3.5 py-1.5 rounded-full border border-cyan-500/30 shadow-lg">
+            <ArrowDown
+              className={`w-4 h-4 transition-transform duration-200 ${
+                pullDistance > 55 ? 'rotate-180 text-emerald-400' : ''
+              }`}
+            />
+            <span>{pullDistance > 55 ? 'Release to refresh' : 'Pull down to refresh'}</span>
           </div>
         </div>
+      )}
 
-        {/* Action icons */}
-        <div className="flex items-center gap-2">
-          {/* Cookie auth button */}
-          <button
-            onClick={() => setShowCookieModal(true)}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-              cookieCount > 0
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                : 'bg-slate-800/80 text-slate-300 border border-slate-700/60 hover:bg-slate-700/60'
-            }`}
-            title="Cookie Authentication"
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span className="font-mono text-[11px]">{cookieCount > 0 ? `${cookieCount} auth` : 'Auth'}</span>
-          </button>
+      {/* Sticky Top Header */}
+      <header className="sticky top-0 z-30 bg-[#0d121f]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+              <Activity className="w-4 h-4 text-slate-950 stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
+                  KIE Status
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                    24H
+                  </span>
+                </h1>
+              </div>
+              <p className="text-[10px] text-slate-400 font-mono">
+                {isRefreshing ? (
+                  <span className="text-cyan-400 animate-pulse">Syncing endpoints...</span>
+                ) : (
+                  <span>Next sync in {countdown}s</span>
+                )}
+              </p>
+            </div>
+          </div>
 
-          {/* Refresh button */}
-          <button
-            onClick={refreshAllModels}
-            disabled={isRefreshing}
-            className="w-9 h-9 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-200 flex items-center justify-center hover:bg-slate-700 active:scale-95 transition-all disabled:opacity-50"
-            title="Refresh Status"
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* Auto refresh countdown badge button */}
+            <button
+              onClick={() => setShowAutoRefreshModal(true)}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-xs font-mono flex items-center gap-1.5 border border-slate-700/60 active:scale-95 transition-all"
+            >
+              <Clock className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{isAutoRefreshEnabled ? `${countdown}s` : 'PAUSED'}</span>
+            </button>
+
+            {/* Cookie modal button */}
+            <button
+              onClick={() => setShowCookieModal(true)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border active:scale-95 transition-all ${
+                cookieCount > 0
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  : 'bg-slate-800/80 text-slate-400 border-slate-700/60'
+              }`}
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span className="font-mono">{cookieCount}</span>
+            </button>
+
+            {/* Manual Sync button */}
+            <button
+              onClick={() => refreshAllModels()}
+              disabled={isRefreshing}
+              className="p-2 rounded-lg bg-cyan-500 text-slate-950 hover:bg-cyan-400 active:scale-95 transition-all shadow-md shadow-cyan-500/20 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 stroke-[2.5] ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Auto-Refresh Bar */}
-      <div className="bg-slate-900/60 border-b border-slate-800/50 px-4 py-2 flex items-center justify-between text-xs text-slate-400">
-        <button
-          onClick={() => setShowAutoRefreshModal(true)}
-          className="flex items-center gap-1.5 hover:text-slate-200 transition-colors"
-        >
-          <Clock className="w-3.5 h-3.5 text-cyan-400" />
-          <span>
-            {isAutoRefreshEnabled ? `Auto-refresh in ${countdown}s (${autoRefreshSeconds}s)` : 'Auto-refresh paused'}
-          </span>
-        </button>
-        <div className="flex items-center gap-2">
-          <button onClick={handleCopyReport} className="text-slate-400 hover:text-cyan-300 transition-colors p-1" title="Copy Report">
-            <Copy className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={() => setShowAddModelModal(true)} className="text-slate-400 hover:text-cyan-300 transition-colors p-1" title="Add Model">
-            <Plus className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
       {/* Main Content Area */}
-      <main className="flex-1 px-4 py-3 space-y-3.5">
-        {/* System Overview Dashboard Card */}
-        <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-[#131b2c] to-slate-900 border border-slate-800 shadow-xl">
-          <div className="flex items-center justify-between mb-3">
+      <main className="flex-1 px-4 py-3 space-y-4 max-w-md mx-auto w-full">
+        {/* System Health Summary Card */}
+        <section className="p-4 rounded-2xl bg-gradient-to-br from-[#121927] to-[#0c101b] border border-slate-800/80 shadow-xl space-y-3.5">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-cyan-400" />
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Gateway Health</span>
+              <span className="text-xs font-semibold text-slate-300">Overall Availability</span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
+                {models.length} Models
+              </span>
             </div>
-            <span className="text-[11px] font-mono text-slate-400">
-              {summary.lastRefreshTime ? `Updated ${summary.lastRefreshTime}` : 'Syncing...'}
-            </span>
+            <button
+              onClick={copyStatusReport}
+              className="text-[11px] font-medium text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+            >
+              <Copy className="w-3 h-3" />
+              Share Report
+            </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
-              <span className="block text-xl font-extrabold text-emerald-400">{summary.operationalCount}</span>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-emerald-300/80">Online</span>
+          <div className="flex items-baseline justify-between">
+            <div>
+              <div className="text-3xl font-extrabold font-mono tracking-tight text-white flex items-baseline gap-1">
+                {summary.averageSuccessRate.toFixed(1)}
+                <span className="text-base font-normal text-slate-400">%</span>
+              </div>
+              <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                Avg Latency: <strong className="text-slate-200">{summary.averageLatencyMs}ms</strong>
+              </p>
             </div>
-            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center">
-              <span className="block text-xl font-extrabold text-amber-400">{summary.degradedCount}</span>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-amber-300/80">Degraded</span>
-            </div>
-            <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">
-              <span className="block text-xl font-extrabold text-rose-400">{summary.outageCount}</span>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-rose-300/80">Outages</span>
+
+            <div className="flex items-center gap-1 text-xs">
+              <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-mono font-semibold border border-emerald-500/20">
+                {summary.operationalCount} OK
+              </span>
+              {summary.degradedCount > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 font-mono font-semibold border border-amber-500/20">
+                  {summary.degradedCount} Deg
+                </span>
+              )}
+              {summary.outageCount > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 font-mono font-semibold border border-rose-500/20">
+                  {summary.outageCount} Down
+                </span>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
-            <div className="flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
-              <span className="text-slate-400">Avg Success:</span>
-              <span className="font-mono font-bold text-white">{summary.averageSuccessRate.toFixed(1)}%</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="text-slate-400">Latency:</span>
-              <span className="font-mono font-bold text-white">{summary.averageLatencyMs}ms</span>
-            </div>
+          {/* Progress bar */}
+          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden flex">
+            <div
+              className="bg-emerald-400 h-full transition-all duration-500"
+              style={{ width: `${(summary.operationalCount / (models.length || 1)) * 100}%` }}
+            />
+            <div
+              className="bg-amber-400 h-full transition-all duration-500"
+              style={{ width: `${(summary.degradedCount / (models.length || 1)) * 100}%` }}
+            />
+            <div
+              className="bg-rose-400 h-full transition-all duration-500"
+              style={{ width: `${(summary.outageCount / (models.length || 1)) * 100}%` }}
+            />
           </div>
-        </div>
+        </section>
 
-        {/* Search and Filters */}
-        <div className="space-y-2">
+        {/* Search, Filter & Action Toolbar */}
+        <section className="space-y-2.5">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search models (e.g. flash, gpt, r1)..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                placeholder="Search models, providers..."
+                className="w-full pl-8.5 pr-3 py-2 bg-slate-900/90 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
               />
               {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400">
-                  <X className="w-3.5 h-3.5" />
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
 
             <button
               onClick={() => setShowSortModal(true)}
-              className="p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 hover:text-cyan-300"
-              title="Sort Options"
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white active:scale-95"
+              aria-label="Sort"
             >
               <SlidersHorizontal className="w-4 h-4" />
             </button>
+
+            <button
+              onClick={() => setShowAddModelModal(true)}
+              className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 active:scale-95"
+              aria-label="Add Model"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
           </div>
 
-          {/* Quick Filter Horizontal Scroll */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-            {(['ALL', 'GOOGLE', 'OPENAI', 'ANTHROPIC', 'DEEPSEEK', 'ISSUES_ONLY'] as ModelFilter[]).map(filter => (
+          {/* Provider Filter Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+            {[
+              { id: 'ALL', label: 'All' },
+              { id: 'GOOGLE', label: 'Google' },
+              { id: 'OPENAI', label: 'OpenAI' },
+              { id: 'ANTHROPIC', label: 'Anthropic' },
+              { id: 'DEEPSEEK', label: 'DeepSeek' },
+              { id: 'ISSUES_ONLY', label: 'Issues Only' }
+            ].map(tab => (
               <button
-                key={filter}
-                onClick={() => setSelectedFilter(filter)}
-                className={`px-3 py-1 rounded-lg text-[11px] font-semibold tracking-wide whitespace-nowrap transition-all ${
-                  selectedFilter === filter
-                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                    : 'bg-slate-900/90 text-slate-400 border border-slate-800/80 hover:bg-slate-800'
+                key={tab.id}
+                onClick={() => setSelectedFilter(tab.id as ModelFilter)}
+                className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                  selectedFilter === tab.id
+                    ? 'bg-cyan-500 text-slate-950 font-bold shadow-sm'
+                    : 'bg-slate-900/80 text-slate-400 border border-slate-800/80 hover:text-slate-200'
                 }`}
               >
-                {filter === 'ALL' ? 'All Models' : filter.replace('_', ' ')}
+                {tab.label}
               </button>
             ))}
           </div>
-        </div>
+        </section>
 
-        {/* Models List */}
+        {/* Model Cards List */}
         <div className="space-y-2.5">
-          {displayedModels.length === 0 ? (
-            <div className="py-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800/60 p-6 space-y-2">
-              <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto opacity-80" />
-              <p className="text-sm font-semibold text-slate-300">No models match your filter</p>
-              <p className="text-xs text-slate-500">Try changing your search term or filter selection.</p>
+          {filteredModels.length === 0 ? (
+            <div className="p-8 text-center rounded-2xl bg-slate-900/40 border border-slate-800/60 text-slate-500 text-xs">
+              No models match current search filter
             </div>
           ) : (
-            displayedModels.map(model => {
+            filteredModels.map(model => {
               const colors = getStatusColor(model.status);
-
               return (
                 <div
                   key={model.modelId}
                   onClick={() => setSelectedModel(model)}
-                  className="p-3.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800/80 border border-slate-800/80 transition-all cursor-pointer active:scale-[0.99] shadow-sm space-y-2.5 group"
+                  className="group relative p-3.5 rounded-2xl bg-[#101624] border border-slate-800/70 hover:border-slate-700 active:scale-[0.99] transition-all cursor-pointer shadow-lg hover:shadow-cyan-950/20"
                 >
-                  {/* Top Row: Provider badge, Model Name, and Status */}
+                  {/* Top Row: Provider badge, Model name, Status Badge */}
                   <div className="flex items-start justify-between gap-2">
-                    <div className="space-y-0.5 flex-1 min-w-0">
+                    <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-md bg-slate-800 text-cyan-400 border border-slate-700/60">
+                        <span className="text-[10px] font-bold font-mono px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400">
                           {model.provider}
                         </span>
-                        {model.isCustom && (
-                          <span className="text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                            Custom
-                          </span>
-                        )}
-                        <h3 className="text-sm font-bold text-white truncate group-hover:text-cyan-300 transition-colors">
-                          {model.modelName}
-                        </h3>
+                        <h3 className="text-xs font-bold text-white truncate">{model.modelName}</h3>
                       </div>
-                      <p className="text-[11px] font-mono text-slate-400 truncate">{model.modelId}</p>
+                      <p className="text-[11px] font-mono text-slate-400 mt-0.5 truncate">{model.modelId}</p>
                     </div>
 
-                    {/* Health Status Pill */}
-                    <div className={`px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${colors.bg} ${colors.border}`}>
-                      <span className={`w-2 h-2 rounded-full ${colors.dot} animate-pulse`} />
-                      <span className={`text-[10px] font-bold uppercase tracking-wider ${colors.text}`}>
-                        {model.status}
-                      </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="text-right">
+                        <div className="text-sm font-bold font-mono text-white flex items-center justify-end gap-1">
+                          {model.successRate.toFixed(1)}%
+                        </div>
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${colors.text}`}>
+                          {model.status}
+                        </span>
+                      </div>
+                      <div className={`w-2 h-2 rounded-full ${colors.dot} shadow-sm animate-pulse`} />
                     </div>
                   </div>
 
-                  {/* Middle Row: Success Rate Bar & Sparkline */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-slate-400 text-[11px]">Availability (24h)</span>
-                      <span className="font-bold text-slate-100">{model.successRate.toFixed(1)}%</span>
-                    </div>
-                    {/* Progress Bar */}
-                    <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-500 rounded-full ${
-                          model.successRate >= 90
-                            ? 'bg-emerald-400'
-                            : model.successRate >= 50
-                            ? 'bg-amber-400'
-                            : 'bg-rose-400'
-                        }`}
-                        style={{ width: `${Math.max(4, model.successRate)}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Bottom Row: Latency, Sparkline Mini, Last Updated */}
-                  <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
-                    <div className="flex items-center gap-1.5 font-mono">
+                  {/* Bottom Row: Latency, Sparkline, Last Updated */}
+                  <div className="mt-3 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                    <div className="flex items-center gap-1.5 text-slate-400 font-mono">
                       <Activity className="w-3.5 h-3.5 text-slate-500" />
                       <span>{model.latencyMs > 0 ? `${model.latencyMs}ms` : '---'}</span>
                     </div>
@@ -528,32 +631,27 @@ export const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Model Details Bottom Sheet Modal */}
-      {selectedModel && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end justify-center animate-fade-in">
-          <div className="bg-[#111827] border-t border-slate-700/80 w-full max-w-md rounded-t-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto">
-            <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto" />
-
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-800 text-cyan-400 border border-slate-700">
-                    {selectedModel.provider}
-                  </span>
-                  <h2 className="text-lg font-bold text-white">{selectedModel.modelName}</h2>
-                </div>
-                <p className="text-xs font-mono text-slate-400 mt-0.5">{selectedModel.modelId}</p>
+      {/* Model Details Draggable Bottom Sheet */}
+      <DraggableSheet
+        isOpen={!!selectedModel}
+        onClose={() => setSelectedModel(null)}
+        title={
+          selectedModel && (
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-800 text-cyan-400 border border-slate-700">
+                  {selectedModel.provider}
+                </span>
+                <h2 className="text-base font-bold text-white truncate">{selectedModel.modelName}</h2>
               </div>
-
-              <button
-                onClick={() => setSelectedModel(null)}
-                className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <p className="text-xs font-mono text-slate-400 mt-0.5 truncate">{selectedModel.modelId}</p>
             </div>
-
-            {/* Status card */}
+          )
+        }
+      >
+        {selectedModel && (
+          <div className="space-y-4">
+            {/* Status grid */}
             <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/60 grid grid-cols-2 gap-3">
               <div>
                 <span className="text-[11px] text-slate-400 block">Status</span>
@@ -592,7 +690,32 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            {/* API Endpoint details */}
+            {/* 24H Sparkline / History */}
+            {selectedModel.historyPoints.length > 0 && (
+              <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400 font-medium">Recent Check History</span>
+                  <span className="text-cyan-400 font-mono text-[11px]">{selectedModel.historyPoints.length} buckets</span>
+                </div>
+                <div className="flex items-end gap-1.5 h-16 pt-2">
+                  {selectedModel.historyPoints.map((pt, idx) => (
+                    <div key={idx} className="flex-1 flex flex-col items-center gap-1 group/bar relative">
+                      <div
+                        className={`w-full rounded-t-sm transition-all ${
+                          pt >= 90 ? 'bg-emerald-400' : pt >= 50 ? 'bg-amber-400' : 'bg-rose-400'
+                        }`}
+                        style={{ height: `${Math.max(4, (pt / 100) * 48)}px` }}
+                      />
+                      <div className="opacity-0 group-hover/bar:opacity-100 absolute -top-6 bg-slate-950 px-1.5 py-0.5 rounded text-[9px] font-mono text-white pointer-events-none transition-opacity">
+                        {pt.toFixed(0)}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Monitoring URL */}
             <div className="space-y-1.5">
               <span className="text-xs font-semibold text-slate-300">Monitoring URL</span>
               <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] font-mono text-cyan-300 break-all select-all">
@@ -621,206 +744,177 @@ export const App: React.FC = () => {
               )}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </DraggableSheet>
 
-      {/* Cookie Authentication Modal */}
-      {showCookieModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#111827] border border-slate-700/80 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
-                  <KeyRound className="w-4 h-4" />
-                </div>
-                <h3 className="text-sm font-bold text-white">Cookie Authentication</h3>
-              </div>
-              <button onClick={() => setShowCookieModal(false)} className="text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
+      {/* Cookie Authentication Draggable Bottom Sheet */}
+      <DraggableSheet
+        isOpen={showCookieModal}
+        onClose={() => setShowCookieModal(false)}
+        icon={<KeyRound className="w-4 h-4 text-cyan-400" />}
+        title="Cookie Authentication"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Paste your Netscape <code className="text-cyan-300">cookie.txt</code> or standard HTTP <code className="text-cyan-300">name=value;</code> string. Stored strictly in memory.
+          </p>
+
+          <textarea
+            value={rawCookieInput}
+            onChange={e => setRawCookieInput(e.target.value)}
+            placeholder="# Netscape HTTP Cookie File&#10;.google.com&#9;TRUE&#9;/&#9;TRUE&#9;1795024725&#9;SID&#9;ABC123...&#10;&#10;or: key=value; session_id=xyz;"
+            className="w-full h-32 bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 resize-none"
+          />
+
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span>Active tokens: <strong className="text-white font-mono">{cookieCount}</strong></span>
+            {cookieCount > 0 && (
+              <button onClick={handleClearCookie} className="text-rose-400 hover:underline">
+                Clear cookies
               </button>
-            </div>
+            )}
+          </div>
 
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Paste your Netscape <code className="text-cyan-300">cookie.txt</code> or standard HTTP <code className="text-cyan-300">name=value;</code> string. Stored strictly in memory.
-            </p>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => setShowCookieModal(false)}
+              className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs hover:bg-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveCookie}
+              className="flex-1 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20"
+            >
+              Apply Cookies
+            </button>
+          </div>
+        </div>
+      </DraggableSheet>
 
-            <textarea
-              value={rawCookieInput}
-              onChange={e => setRawCookieInput(e.target.value)}
-              placeholder="# Netscape HTTP Cookie File&#10;.google.com&#9;TRUE&#9;/&#9;TRUE&#9;1795024725&#9;SID&#9;ABC123...&#10;&#10;or: key=value; session_id=xyz;"
-              className="w-full h-32 bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 resize-none"
+      {/* Add Custom Model Draggable Bottom Sheet */}
+      <DraggableSheet
+        isOpen={showAddModelModal}
+        onClose={() => setShowAddModelModal(false)}
+        icon={<Plus className="w-4 h-4 text-cyan-400" />}
+        title="Add Custom Model"
+      >
+        <form onSubmit={handleAddCustomModel} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs text-slate-400">Model ID</label>
+            <input
+              type="text"
+              value={newModelInput}
+              onChange={e => setNewModelInput(e.target.value)}
+              placeholder="e.g. gpt-4o, claude-3-7-sonnet"
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50"
+              autoFocus
             />
-
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Active tokens: <strong className="text-white font-mono">{cookieCount}</strong></span>
-              {cookieCount > 0 && (
-                <button onClick={handleClearCookie} className="text-rose-400 hover:underline">
-                  Clear cookies
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                onClick={() => setShowCookieModal(false)}
-                className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs hover:bg-slate-700"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveCookie}
-                className="flex-1 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20"
-              >
-                Apply Cookies
-              </button>
-            </div>
           </div>
-        </div>
-      )}
 
-      {/* Add Custom Model Modal */}
-      {showAddModelModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <form onSubmit={handleAddCustomModel} className="bg-[#111827] border border-slate-700/80 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
-                  <Plus className="w-4 h-4" />
-                </div>
-                <h3 className="text-sm font-bold text-white">Add Custom Model</h3>
-              </div>
-              <button type="button" onClick={() => setShowAddModelModal(false)} className="text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setShowAddModelModal(false)}
+              className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs hover:bg-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20"
+            >
+              Add & Monitor
+            </button>
+          </div>
+        </form>
+      </DraggableSheet>
 
-            <div className="space-y-1">
-              <label className="text-xs text-slate-400">Model ID</label>
-              <input
-                type="text"
-                value={newModelInput}
-                onChange={e => setNewModelInput(e.target.value)}
-                placeholder="e.g. gpt-4o, claude-3-7-sonnet"
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50"
-                autoFocus
+      {/* Auto-Refresh Settings Draggable Bottom Sheet */}
+      <DraggableSheet
+        isOpen={showAutoRefreshModal}
+        onClose={() => setShowAutoRefreshModal(false)}
+        icon={<Clock className="w-4 h-4 text-cyan-400" />}
+        title="Auto-Refresh Interval"
+      >
+        <div className="space-y-4">
+          {/* Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
+            <span className="text-xs font-medium text-slate-200">Enable Automatic Polling</span>
+            <button
+              onClick={() => setIsAutoRefreshEnabled(!isAutoRefreshEnabled)}
+              className={`w-11 h-6 rounded-full p-1 transition-colors ${
+                isAutoRefreshEnabled ? 'bg-cyan-500' : 'bg-slate-700'
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                  isAutoRefreshEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
               />
-            </div>
+            </button>
+          </div>
 
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowAddModelModal(false)}
-                className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300 font-semibold text-xs hover:bg-slate-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="flex-1 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20"
-              >
-                Add & Monitor
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Auto-Refresh Settings Modal */}
-      {showAutoRefreshModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#111827] border border-slate-700/80 w-full max-w-sm rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-sm font-bold text-white">Auto-Refresh Interval</h3>
-              </div>
-              <button onClick={() => setShowAutoRefreshModal(false)} className="text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Toggle */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800">
-              <span className="text-xs font-medium text-slate-200">Enable Automatic Polling</span>
-              <button
-                onClick={() => setIsAutoRefreshEnabled(!isAutoRefreshEnabled)}
-                className={`w-11 h-6 rounded-full p-1 transition-colors ${
-                  isAutoRefreshEnabled ? 'bg-cyan-500' : 'bg-slate-700'
-                }`}
-              >
-                <div
-                  className={`w-4 h-4 rounded-full bg-white transition-transform ${
-                    isAutoRefreshEnabled ? 'translate-x-5' : 'translate-x-0'
+          {/* Intervals */}
+          <div className="space-y-1.5">
+            <span className="text-xs text-slate-400">Interval duration</span>
+            <div className="grid grid-cols-4 gap-2">
+              {[15, 30, 45, 60].map(sec => (
+                <button
+                  key={sec}
+                  onClick={() => {
+                    setAutoRefreshSeconds(sec);
+                    setCountdown(sec);
+                    setShowAutoRefreshModal(false);
+                    showToast(`Interval set to ${sec}s`);
+                  }}
+                  className={`py-2 rounded-xl text-xs font-mono font-bold transition-all ${
+                    autoRefreshSeconds === sec
+                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                      : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
                   }`}
-                />
-              </button>
-            </div>
-
-            {/* Intervals */}
-            <div className="space-y-1.5">
-              <span className="text-xs text-slate-400">Interval duration</span>
-              <div className="grid grid-cols-4 gap-2">
-                {[15, 30, 45, 60].map(sec => (
-                  <button
-                    key={sec}
-                    onClick={() => {
-                      setAutoRefreshSeconds(sec);
-                      setCountdown(sec);
-                      setShowAutoRefreshModal(false);
-                      showToast(`Interval set to ${sec}s`);
-                    }}
-                    className={`py-2 rounded-xl text-xs font-mono font-bold transition-all ${
-                      autoRefreshSeconds === sec
-                        ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                        : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
-                    }`}
-                  >
-                    {sec}s
-                  </button>
-                ))}
-              </div>
+                >
+                  {sec}s
+                </button>
+              ))}
             </div>
           </div>
         </div>
-      )}
+      </DraggableSheet>
 
-      {/* Sort Modal */}
-      {showSortModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end justify-center p-4 animate-fade-in">
-          <div className="bg-[#111827] border border-slate-700/80 w-full max-w-sm rounded-2xl p-5 space-y-3 shadow-2xl">
-            <div className="flex items-center justify-between pb-1">
-              <h3 className="text-sm font-bold text-white">Sort Models By</h3>
-              <button onClick={() => setShowSortModal(false)} className="text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {[
-              { id: 'DEFAULT', label: 'Default Order' },
-              { id: 'SUCCESS_RATE_DESC', label: 'Highest Success Rate' },
-              { id: 'SUCCESS_RATE_ASC', label: 'Lowest Success Rate' },
-              { id: 'LATENCY_ASC', label: 'Lowest Latency (Fastest)' },
-              { id: 'NAME_ASC', label: 'Alphabetical (A-Z)' },
-            ].map(item => (
-              <button
-                key={item.id}
-                onClick={() => {
-                  setSelectedSort(item.id as SortOption);
-                  setShowSortModal(false);
-                }}
-                className={`w-full p-3 rounded-xl text-xs font-semibold flex items-center justify-between ${
-                  selectedSort === item.id
-                    ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
-                    : 'bg-slate-900 text-slate-300 border border-slate-800/80 hover:bg-slate-800'
-                }`}
-              >
-                <span>{item.label}</span>
-                {selectedSort === item.id && <Check className="w-4 h-4 text-cyan-400" />}
-              </button>
-            ))}
-          </div>
+      {/* Sort Draggable Bottom Sheet */}
+      <DraggableSheet
+        isOpen={showSortModal}
+        onClose={() => setShowSortModal(false)}
+        icon={<SlidersHorizontal className="w-4 h-4 text-cyan-400" />}
+        title="Sort Models By"
+      >
+        <div className="space-y-2">
+          {[
+            { id: 'DEFAULT', label: 'Default Order' },
+            { id: 'SUCCESS_RATE_DESC', label: 'Highest Success Rate' },
+            { id: 'SUCCESS_RATE_ASC', label: 'Lowest Success Rate' },
+            { id: 'LATENCY_ASC', label: 'Lowest Latency (Fastest)' },
+            { id: 'NAME_ASC', label: 'Alphabetical (A-Z)' }
+          ].map(item => (
+            <button
+              key={item.id}
+              onClick={() => {
+                setSelectedSort(item.id as SortOption);
+                setShowSortModal(false);
+              }}
+              className={`w-full p-3 rounded-xl text-xs font-semibold flex items-center justify-between transition-all ${
+                selectedSort === item.id
+                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
+                  : 'bg-slate-900 text-slate-300 border border-slate-800/80 hover:bg-slate-800'
+              }`}
+            >
+              <span>{item.label}</span>
+              {selectedSort === item.id && <Check className="w-4 h-4 text-cyan-400" />}
+            </button>
+          ))}
         </div>
-      )}
+      </DraggableSheet>
     </div>
   );
 };

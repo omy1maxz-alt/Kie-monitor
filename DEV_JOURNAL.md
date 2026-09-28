@@ -22,3 +22,12 @@
 - Discovered active model keys: `gemini-2.5-flash`, `gemini-2.5-pro`, `claude-sonnet-5`, `claude-opus-5`, `deepseek-v4-1-flash`, `gpt-5-6-sol`, `gpt-5-6-luna`, `gpt-5-5`, `gpt-5-2`.
 - Fixed bucket parser to handle null current intervals by extracting data from `isNormal` and completed buckets.
 - Updated default model registry in both Android and Web implementations.
+
+## 2026-09-28 - Mobile Touch Gestures: Drag Up/Down, Swipe-to-Close, and Pull-to-Refresh
+- Created `DraggableSheet` component supporting 60fps touch gestures:
+  - Real-time `translateY` tracking on touch/mouse drag.
+  - Upward rubber-band elastic resistance.
+  - Swipe-to-close with spring physics (triggered at >80px displacement or rapid flick velocity).
+  - Visual grab handle with interactive cues.
+- Integrated `DraggableSheet` across all modals: Model Details, Cookie Authentication, Add Custom Model, Auto-Refresh Settings, and Sort Options.
+- Added smooth Pull-to-Refresh gesture to the main model list.
